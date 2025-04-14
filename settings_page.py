@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import json
 
+APP_NAME = "MyApp"  # Use a global constant for the application name
 SETTINGS_FILE = "settings.json"
 
 def get_default_backup_folder():
@@ -11,10 +12,10 @@ def get_default_backup_folder():
     system = platform.system()
     if system == "Windows":
         # Windows-specific path
-        return os.path.join(os.getenv('LOCALAPPDATA', os.getcwd()), "AppName", "backups")
+        return os.path.join(os.getenv('LOCALAPPDATA', os.getcwd()), APP_NAME, "backups")
     else:
         # macOS/Linux path
-        return os.path.expanduser("~/.AppName/backups")
+        return os.path.expanduser(f"~/.{APP_NAME}/backups")
 
 def load_settings():
     """Load settings from settings.json or return default values."""
@@ -47,21 +48,28 @@ def load_settings():
 
 def save_settings(settings):
     """Save settings to settings.json."""
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=4)
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings, f, indent=4)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to save settings: {str(e)}")
 
 def settings_page(root, settings, preselected_file=None):
     """Settings page with configurable options."""
     frame = tk.Frame(root)
 
     def select_backup_folder():
-        """Open a folder selection dialog and update the backup folder setting."""
+        """Open a folder selection dialog, validate, and update the backup folder setting."""
         folder_path = filedialog.askdirectory()
         if folder_path:
-            settings["backup_folder"] = folder_path
-            backup_folder_label.config(text=f"Backup Folder: {folder_path}")
-            save_settings(settings)
-            messagebox.showinfo("Success", "Backup folder updated successfully!")
+            # Check if the folder is writable
+            if os.access(folder_path, os.W_OK):
+                settings["backup_folder"] = folder_path
+                backup_folder_label.config(text=f"Backup Folder: {folder_path}")
+                save_settings(settings)
+                messagebox.showinfo("Success", "Backup folder updated successfully!")
+            else:
+                messagebox.showerror("Error", "The selected folder is not writable. Please choose another folder.")
 
     def update_max_backups():
         """Update the max backups setting."""
