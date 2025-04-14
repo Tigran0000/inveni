@@ -8,10 +8,6 @@ import datetime
 
 # File paths
 TRACKED_FILES_PATH = "tracked_files.json"
-BACKUP_FOLDER = r"C:\Project\inveni\inveni\backups"  # Default backup folder
-
-# Ensure the backup folder exists
-os.makedirs(BACKUP_FOLDER, exist_ok=True)
 
 def calculate_file_hash(file_path):
     """Calculate the SHA-256 hash of a file."""
@@ -38,6 +34,15 @@ def save_tracked_files(tracked_files):
     """Save tracked file metadata to JSON."""
     with open(TRACKED_FILES_PATH, "w", encoding="utf-8") as file:
         json.dump(tracked_files, file, indent=4)
+
+def get_backup_folder(settings):
+    """Fetch the dynamic backup folder and ensure it exists."""
+    backup_folder = settings.get("backup_folder", "backups")  # Default to "backups"
+    try:
+        os.makedirs(backup_folder, exist_ok=True)  # Ensure folder exists
+    except OSError as e:
+        raise Exception(f"Failed to create/access backup folder: {backup_folder}. Error: {e}")
+    return backup_folder
 
 def commit_page(root, settings, preselected_file=None):
     """Commit page with optional preselected file."""
@@ -90,51 +95,42 @@ def commit_page(root, settings, preselected_file=None):
             messagebox.showinfo("No Changes Detected", f"No changes detected for {selected_file}. Commit skipped.")
             return
 
-        # Create a backup file in the BACKUP_FOLDER with the file's hash as its name
-        backup_file_path = os.path.join(BACKUP_FOLDER, current_hash)
+        # Get backup folder and create a backup file
+        backup_folder = get_backup_folder(settings)
+        backup_file_path = os.path.join(backup_folder, current_hash)
         try:
             shutil.copy(selected_file, backup_file_path)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create a backup file: {str(e)}")
             return
 
-        # Update tracked files with the new hash and metadata
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Save the new version metadata
         file_versions[current_hash] = {
-            "timestamp": timestamp,
-            "commit_message": commit_message,
+            "timestamp": datetime.datetime.now().isoformat(),
             "username": username,
+            "commit_message": commit_message
         }
         save_tracked_files(tracked_files)
 
-        # Show success message
-        messagebox.showinfo("Success", f"File committed successfully!\n\nFile: {selected_file}\nUser: {username}")
-        selected_file_label.config(text="No file selected")
-        commit_message_entry.delete(0, tk.END)
+        messagebox.showinfo("Success", f"File '{selected_file}' committed successfully!")
 
     frame = tk.Frame(root)
 
     # Title
-    tk.Label(frame, text="Commit a File", font=("Arial", 16)).pack(pady=10)
+    tk.Label(frame, text="Commit", font=("Arial", 16)).pack(pady=10)
 
-    # File selection
-    selected_file_label = tk.Label(frame, text=f"Selected File: {selected_file}" if selected_file else "No file selected", font=("Arial", 10), fg="gray")
+    # Selected file
+    selected_file_label = tk.Label(frame, text="No file selected", font=("Arial", 10), fg="gray")
     selected_file_label.pack(pady=5)
     tk.Button(frame, text="Select File", command=select_file).pack(pady=5)
 
     # Commit message
-    tk.Label(frame, text="Commit Message:").pack(pady=5)
+    tk.Label(frame, text="Commit Message:", font=("Arial", 12)).pack(pady=5)
     commit_message_entry = tk.Entry(frame, width=50)
     commit_message_entry.pack(pady=5)
 
     # Commit button
-    commit_button = tk.Button(frame, text="Commit", command=commit_file_action)
+    commit_button = tk.Button(frame, text="Commit", command=commit_file_action, state=tk.DISABLED)
     commit_button.pack(pady=10)
-
-    # Enable or disable the commit button based on whether a file is preselected
-    if selected_file:
-        commit_button.config(state=tk.NORMAL)
-    else:
-        commit_button.config(state=tk.DISABLED)
 
     return frame
