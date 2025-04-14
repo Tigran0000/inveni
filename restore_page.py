@@ -3,13 +3,17 @@ import shutil
 import gzip
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from settings_page import get_default_backup_folder  # Import the dynamic folder function
 from utils import load_tracked_files  # Refactored utilities
 
 def decompress_file(compressed_file_path, output_file_path):
     """Decompress a gzip file."""
-    with gzip.open(compressed_file_path, "rb") as f_in:
-        with open(output_file_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+    try:
+        with gzip.open(compressed_file_path, "rb") as f_in:
+            with open(output_file_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+    except Exception as e:
+        raise Exception(f"Decompression failed: {str(e)}")
 
 def restore_version(file_path, version_hash, backup_folder):
     """Restore the file to the specified version."""
@@ -17,33 +21,40 @@ def restore_version(file_path, version_hash, backup_folder):
 
     if not os.path.exists(compressed_backup_file_path):
         raise FileNotFoundError(f"Backup file for version {version_hash} not found.")
-    
+
     try:
         decompress_file(compressed_backup_file_path, file_path)
     except Exception as e:
         raise Exception(f"Failed to restore the file: {str(e)}")
 
-def restore_page(root, settings, preselected_file=None):
-    selected_file = preselected_file
+def normalize_path(path):
+    """Normalize file paths for consistent comparison."""
+    return os.path.normpath(path)
+
+def restore_page(root, settings, shared_state):
+    """Restore page GUI for restoring file versions."""
+    # Extract the selected file from the shared state
+    selected_file = shared_state.get_selected_file()
+    selected_file = normalize_path(selected_file) if selected_file else None
     tracked_files = load_tracked_files()
 
     # Dynamic backup folder
-    backup_folder = settings.get("backup_folder", "backups")
+    backup_folder = settings.get("backup_folder", get_default_backup_folder())  # Use dynamic fallback
     os.makedirs(backup_folder, exist_ok=True)  # Ensure the folder exists
 
     def update_version_list():
         """Update the version list based on the selected file."""
         version_list.delete(*version_list.get_children())  # Clear existing entries
 
-        if not selected_file or selected_file not in tracked_files:
+        if not selected_file or normalize_path(selected_file) not in tracked_files:
             messagebox.showwarning("Warning", "No tracked versions found for the selected file.")
             return
 
         # Retrieve the metadata for the selected file
-        file_metadata = tracked_files[selected_file]
+        file_metadata = tracked_files[normalize_path(selected_file)]
 
         # Ensure the file has a "versions" key
-        if "versions" not in file_metadata:
+        if "versions" not in file_metadata or not file_metadata["versions"]:
             messagebox.showwarning("Warning", "No version history found for the selected file.")
             return
 
@@ -63,9 +74,15 @@ def restore_page(root, settings, preselected_file=None):
         nonlocal selected_file
         file_path = filedialog.askopenfilename()
         if file_path:
-            selected_file = file_path
+            selected_file = normalize_path(file_path)
+            shared_state.set_selected_file(selected_file)  # Update the shared state
             selected_file_label.config(text=f"Selected File: {file_path}")
             update_version_list()
+        else:
+            selected_file = None
+            shared_state.set_selected_file(None)  # Clear the shared state
+            selected_file_label.config(text="No file selected")
+            version_list.delete(*version_list.get_children())
 
     def restore_selected_version():
         """Restore the selected version of the file."""
@@ -96,7 +113,12 @@ def restore_page(root, settings, preselected_file=None):
     tk.Label(frame, text="Restore a File", font=("Arial", 16)).pack(pady=10)
 
     # Selected file label
-    selected_file_label = tk.Label(frame, text=f"Selected File: {selected_file}" if selected_file else "No file selected", font=("Arial", 10), fg="gray")
+    selected_file_label = tk.Label(
+        frame,
+        text=f"Selected File: {selected_file}" if selected_file else "No file selected",
+        font=("Arial", 10),
+        fg="gray"
+    )
     selected_file_label.pack(pady=5)
 
     # Select file button
