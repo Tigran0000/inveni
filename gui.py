@@ -1,38 +1,10 @@
 import os
 import sys
-import json
 import tkinter as tk
-from tkinter import messagebox
-from tkinter import ttk  # Import ttk for themed widgets
+from tkinter import ttk
 from gui_commit_page import commit_page
 from restore_page import restore_page
-from settings_page import settings_page
-
-# Paths and constants
-SETTINGS_FILE = "settings.json"
-DEFAULT_BACKUP_FOLDER = "backups"
-
-
-def load_settings():
-    """Load settings from settings.json or return default values."""
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, ValueError):
-            print("Error: settings.json is corrupted. Resetting to default settings.")
-    
-    # Reset to default settings and save the file
-    default_settings = {"backup_folder": DEFAULT_BACKUP_FOLDER, "max_backups": 5}
-    save_settings(default_settings)
-    return default_settings
-
-
-def save_settings(settings):
-    """Save settings to settings.json."""
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(settings, f, indent=4)
-
+from settings_page import settings_page, load_settings
 
 def main():
     # Check for a file path passed as an argument
@@ -40,7 +12,7 @@ def main():
     if len(sys.argv) > 1:
         preselected_file = sys.argv[1]
         if not os.path.exists(preselected_file):
-            messagebox.showerror("Error", f"The selected file does not exist: {preselected_file}")
+            print(f"Error: The selected file does not exist: {preselected_file}")
             preselected_file = None
 
     # Load settings
@@ -62,7 +34,6 @@ def main():
 
     # Start the Tkinter main loop
     root.mainloop()
-
 
 if __name__ == "__main__":
     main()
