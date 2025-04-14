@@ -8,6 +8,11 @@ import datetime
 
 # File paths
 TRACKED_FILES_PATH = "tracked_files.json"
+BACKUP_FOLDER = r"C:\Project\inveni\inveni\backups"  # Default backup folder
+
+# Ensure the backup folder exists
+os.makedirs(BACKUP_FOLDER, exist_ok=True)
+
 
 def calculate_file_hash(file_path):
     """Calculate the SHA-256 hash of a file."""
@@ -20,6 +25,7 @@ def calculate_file_hash(file_path):
     except FileNotFoundError:
         return None
 
+
 def load_tracked_files():
     """Load tracked file metadata from JSON."""
     if not os.path.exists(TRACKED_FILES_PATH):
@@ -30,41 +36,45 @@ def load_tracked_files():
     except json.JSONDecodeError:
         return {}
 
+
 def save_tracked_files(tracked_files):
     """Save tracked file metadata to JSON."""
     with open(TRACKED_FILES_PATH, "w", encoding="utf-8") as file:
         json.dump(tracked_files, file, indent=4)
 
-def get_backup_folder(settings):
-    """Fetch the dynamic backup folder and ensure it exists."""
-    backup_folder = settings.get("backup_folder", "backups")  # Default to "backups"
-    try:
-        os.makedirs(backup_folder, exist_ok=True)  # Ensure folder exists
-    except OSError as e:
-        raise Exception(f"Failed to create/access backup folder: {backup_folder}. Error: {e}")
-    return backup_folder
 
-def commit_page(root, settings, preselected_file=None):
-    """Commit page with optional preselected file."""
-    selected_file = preselected_file
+def commit_page(root, settings, shared_state):
+    """Commit page with SharedState integration."""
+    # Get the initial selected file from the shared state
+    selected_file = shared_state.get_selected_file()
 
     def select_file():
-        """Open a file dialog to select a file and display its path."""
-        nonlocal selected_file
+        """Open a file dialog to select a file and update the shared state."""
         file_path = filedialog.askopenfilename()
         if file_path:
-            selected_file = file_path
+            shared_state.set_selected_file(file_path)
             selected_file_label.config(text=f"Selected File: {file_path}")
             commit_button.config(state=tk.NORMAL)
+            commit_message_entry.config(state=tk.NORMAL)
         else:
-            selected_file = None
+            shared_state.set_selected_file(None)
             selected_file_label.config(text="No file selected")
             commit_button.config(state=tk.DISABLED)
+            commit_message_entry.config(state=tk.DISABLED)
 
     def commit_file_action():
         """Handle the commit action."""
+        nonlocal selected_file
+        selected_file = shared_state.get_selected_file()
+
+        # Check if a file is selected
         if not selected_file:
             messagebox.showerror("Error", "No file selected! Please select a file to commit.")
+            return
+
+        # Ensure the file exists
+        if not os.path.exists(selected_file):
+            messagebox.showerror("Error", f"Selected file does not exist: {selected_file}")
             return
 
         commit_message = commit_message_entry.get().strip()
@@ -83,6 +93,10 @@ def commit_page(root, settings, preselected_file=None):
         tracked_files = load_tracked_files()
         current_hash = calculate_file_hash(selected_file)
 
+        if current_hash is None:
+            messagebox.showerror("Error", f"Failed to calculate file hash for: {selected_file}")
+            return
+
         # Ensure the file is in the tracked files structure
         if selected_file not in tracked_files:
             tracked_files[selected_file] = {"versions": {}}
@@ -95,42 +109,62 @@ def commit_page(root, settings, preselected_file=None):
             messagebox.showinfo("No Changes Detected", f"No changes detected for {selected_file}. Commit skipped.")
             return
 
-        # Get backup folder and create a backup file
-        backup_folder = get_backup_folder(settings)
-        backup_file_path = os.path.join(backup_folder, current_hash)
+        # Create a backup file in the BACKUP_FOLDER with the file's hash as its name
+        backup_file_path = os.path.join(BACKUP_FOLDER, current_hash)
         try:
             shutil.copy(selected_file, backup_file_path)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to create a backup file: {str(e)}")
             return
 
-        # Save the new version metadata
+        # Update tracked files with the new hash and metadata
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         file_versions[current_hash] = {
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": timestamp,
+            "commit_message": commit_message,
             "username": username,
-            "commit_message": commit_message
         }
         save_tracked_files(tracked_files)
 
-        messagebox.showinfo("Success", f"File '{selected_file}' committed successfully!")
+        # Show success message
+        messagebox.showinfo("Success", f"File committed successfully!\n\nFile: {selected_file}\nUser: {username}")
+        selected_file_label.config(text="No file selected")
+        commit_message_entry.delete(0, tk.END)
+        commit_button.config(state=tk.DISABLED)
+        commit_message_entry.config(state=tk.DISABLED)
 
     frame = tk.Frame(root)
 
     # Title
-    tk.Label(frame, text="Commit", font=("Arial", 16)).pack(pady=10)
+    tk.Label(frame, text="Commit a File", font=("Arial", 16)).pack(pady=10)
 
-    # Selected file
-    selected_file_label = tk.Label(frame, text="No file selected", font=("Arial", 10), fg="gray")
+    # File selection
+    selected_file_label = tk.Label(
+        frame,
+        text=f"Selected File: {selected_file}" if selected_file else "No file selected",
+        font=("Arial", 10),
+        fg="gray",
+    )
     selected_file_label.pack(pady=5)
     tk.Button(frame, text="Select File", command=select_file).pack(pady=5)
 
     # Commit message
-    tk.Label(frame, text="Commit Message:", font=("Arial", 12)).pack(pady=5)
-    commit_message_entry = tk.Entry(frame, width=50)
+    tk.Label(frame, text="Commit Message:").pack(pady=5)
+    commit_message_entry = tk.Entry(frame, width=50, state=tk.DISABLED)
     commit_message_entry.pack(pady=5)
 
     # Commit button
     commit_button = tk.Button(frame, text="Commit", command=commit_file_action, state=tk.DISABLED)
     commit_button.pack(pady=10)
+
+    # Enable fields for valid preselected file
+    if selected_file:
+        selected_file_label.config(text=f"Selected File: {selected_file}")
+        commit_message_entry.config(state=tk.NORMAL)
+        commit_button.config(state=tk.NORMAL)
+    else:
+        selected_file_label.config(text="No valid file selected")
+        commit_message_entry.config(state=tk.DISABLED)
+        commit_button.config(state=tk.DISABLED)
 
     return frame
