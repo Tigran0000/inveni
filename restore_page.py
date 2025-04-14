@@ -1,40 +1,35 @@
 import os
 import shutil
+import gzip
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import json
+from utils import load_tracked_files  # Refactored utilities
 
-TRACKED_FILES_PATH = "tracked_files.json"
-BACKUP_FOLDER = r"C:\Project\inveni\inveni\backups"  # Updated default backup folder
+def decompress_file(compressed_file_path, output_file_path):
+    """Decompress a gzip file."""
+    with gzip.open(compressed_file_path, "rb") as f_in:
+        with open(output_file_path, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
 
-# Ensure the backup folder exists
-os.makedirs(BACKUP_FOLDER, exist_ok=True)
-
-def load_tracked_files():
-    """Load tracked file metadata from JSON."""
-    if not os.path.exists(TRACKED_FILES_PATH):
-        return {}
-    try:
-        with open(TRACKED_FILES_PATH, "r", encoding="utf-8") as file:
-            return json.load(file)
-    except json.JSONDecodeError:
-        return {}
-
-def restore_version(file_path, version_hash):
+def restore_version(file_path, version_hash, backup_folder):
     """Restore the file to the specified version."""
-    backup_file_path = os.path.join(BACKUP_FOLDER, version_hash)
+    compressed_backup_file_path = os.path.join(backup_folder, f"{version_hash}.gz")
 
-    if not os.path.exists(backup_file_path):
+    if not os.path.exists(compressed_backup_file_path):
         raise FileNotFoundError(f"Backup file for version {version_hash} not found.")
     
     try:
-        shutil.copy(backup_file_path, file_path)
+        decompress_file(compressed_backup_file_path, file_path)
     except Exception as e:
         raise Exception(f"Failed to restore the file: {str(e)}")
 
 def restore_page(root, settings, preselected_file=None):
     selected_file = preselected_file
     tracked_files = load_tracked_files()
+
+    # Dynamic backup folder
+    backup_folder = settings.get("backup_folder", "backups")
+    os.makedirs(backup_folder, exist_ok=True)  # Ensure the folder exists
 
     def update_version_list():
         """Update the version list based on the selected file."""
@@ -88,7 +83,7 @@ def restore_page(root, settings, preselected_file=None):
         version_hash = version_list.item(selected_item, "values")[3]
 
         try:
-            restore_version(selected_file, version_hash)
+            restore_version(selected_file, version_hash, backup_folder)
             messagebox.showinfo("Success", f"File '{selected_file}' has been restored to the selected version.")
         except FileNotFoundError as e:
             messagebox.showerror("Error", str(e))
