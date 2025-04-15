@@ -65,7 +65,8 @@ if __name__ == "__main__":
         main()
     except Exception as e:
         # Log the error to a file
-        with open("error_log.txt", "a") as log_file:
+        log_file_path = os.path.join(os.getcwd(), "error_log.txt")
+        with open(log_file_path, "a") as log_file:
             log_file.write(f"Error: {str(e)}\n")
         # Show the error message to the user
         messagebox.showerror("Critical Error", str(e))
