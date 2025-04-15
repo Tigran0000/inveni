@@ -3,8 +3,7 @@ import shutil
 import gzip
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from settings_page import get_default_backup_folder  # Import the dynamic folder function
-from utils import load_tracked_files  # Refactored utilities
+from utils import load_tracked_files
 
 def decompress_file(compressed_file_path, output_file_path):
     """Decompress a gzip file."""
@@ -27,38 +26,29 @@ def restore_version(file_path, version_hash, backup_folder):
     except Exception as e:
         raise Exception(f"Failed to restore the file: {str(e)}")
 
-def normalize_path(path):
-    """Normalize file paths for consistent comparison."""
-    return os.path.normpath(path)
-
 def restore_page(root, settings, shared_state):
     """Restore page GUI for restoring file versions."""
-    # Extract the selected file from the shared state
     selected_file = shared_state.get_selected_file()
-    selected_file = normalize_path(selected_file) if selected_file else None
-    tracked_files = load_tracked_files()
-
-    # Dynamic backup folder
-    backup_folder = settings.get("backup_folder", get_default_backup_folder())  # Use dynamic fallback
-    os.makedirs(backup_folder, exist_ok=True)  # Ensure the folder exists
+    backup_folder = settings.get("backup_folder", "backups")
+    os.makedirs(backup_folder, exist_ok=True)
 
     def update_version_list():
         """Update the version list based on the selected file."""
-        version_list.delete(*version_list.get_children())  # Clear existing entries
+        version_list.delete(*version_list.get_children())
 
-        if not selected_file or normalize_path(selected_file) not in tracked_files:
-            messagebox.showwarning("Warning", "No tracked versions found for the selected file.")
+        if not selected_file:
             return
 
-        # Retrieve the metadata for the selected file
-        file_metadata = tracked_files[normalize_path(selected_file)]
+        tracked_files = load_tracked_files()
+        normalized_file_path = os.path.normpath(selected_file)
 
-        # Ensure the file has a "versions" key
+        if normalized_file_path not in tracked_files:
+            return
+
+        file_metadata = tracked_files[normalized_file_path]
         if "versions" not in file_metadata or not file_metadata["versions"]:
-            messagebox.showwarning("Warning", "No version history found for the selected file.")
             return
 
-        # Populate the version list with metadata
         for version_hash, metadata in file_metadata["versions"].items():
             version_list.insert(
                 "", "end", values=(
@@ -70,49 +60,41 @@ def restore_page(root, settings, shared_state):
             )
 
     def select_file():
-        """Open a file dialog to select a file and update the version list."""
-        nonlocal selected_file
+        """Open a file dialog to select a file and update the shared state."""
         file_path = filedialog.askopenfilename()
         if file_path:
-            selected_file = normalize_path(file_path)
-            shared_state.set_selected_file(selected_file)  # Update the shared state
-            selected_file_label.config(text=f"Selected File: {file_path}")
+            shared_state.set_selected_file(file_path)
+        else:
+            shared_state.set_selected_file(None)
+
+    def on_file_updated(file_path):
+        """Callback to update the UI when the selected file changes."""
+        nonlocal selected_file
+        selected_file = file_path
+        if selected_file:
+            selected_file_label.config(text=f"Selected File: {selected_file}")
             update_version_list()
         else:
-            selected_file = None
-            shared_state.set_selected_file(None)  # Clear the shared state
             selected_file_label.config(text="No file selected")
             version_list.delete(*version_list.get_children())
 
     def restore_selected_version():
         """Restore the selected version of the file."""
         selected_item = version_list.selection()
-
-        if not selected_file:
-            messagebox.showerror("Error", "No file selected! Please select a file to restore.")
+        if not selected_file or not selected_item:
+            messagebox.showerror("Error", "No file or version selected!")
             return
 
-        if not selected_item:
-            messagebox.showerror("Error", "No version selected! Please select a version to restore.")
-            return
-
-        # Get the version hash from the selected item
         version_hash = version_list.item(selected_item, "values")[3]
-
         try:
             restore_version(selected_file, version_hash, backup_folder)
             messagebox.showinfo("Success", f"File '{selected_file}' has been restored to the selected version.")
-        except FileNotFoundError as e:
-            messagebox.showerror("Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to restore the file: {str(e)}")
 
     frame = tk.Frame(root)
-
-    # Title
     tk.Label(frame, text="Restore a File", font=("Arial", 16)).pack(pady=10)
 
-    # Selected file label
     selected_file_label = tk.Label(
         frame,
         text=f"Selected File: {selected_file}" if selected_file else "No file selected",
@@ -120,27 +102,19 @@ def restore_page(root, settings, shared_state):
         fg="gray"
     )
     selected_file_label.pack(pady=5)
-
-    # Select file button
     tk.Button(frame, text="Select File", command=select_file).pack(pady=5)
 
-    # Version list
     tk.Label(frame, text="Select a Version:").pack(pady=5)
     version_list = ttk.Treeview(frame, columns=("Timestamp", "User", "Message", "Hash"), show="headings", height=8)
     version_list.pack(pady=5, fill="x", expand=True)
-
-    # Define the columns
     version_list.heading("Timestamp", text="Date and Time")
     version_list.heading("User", text="User")
     version_list.heading("Message", text="Commit Message")
     version_list.heading("Hash", text="Version Hash")
-    version_list.column("Hash", width=250)  # Adjust width for better visibility
+    version_list.column("Hash", width=250)
 
-    # Restore button
     tk.Button(frame, text="Restore Selected Version", command=restore_selected_version).pack(pady=10)
 
-    # Automatically update the version list if a file is preselected
-    if selected_file:
-        update_version_list()
+    shared_state.add_callback(on_file_updated)
 
     return frame
