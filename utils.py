@@ -1,62 +1,107 @@
-import json
 import os
+import json
+import gzip
+import hashlib
+from tkinter import filedialog, messagebox
+import datetime
+from typing import Optional, Dict, Any
 
-APP_NAME = "MyApp"
-BASE_DIR = os.path.join(os.getenv('LOCALAPPDATA', os.getcwd()), APP_NAME)  # Configurable base directory
 
-SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
-TRACKED_FILES_PATH = os.path.join(BASE_DIR, "tracked_files.json")
+def log_error(error_message: str) -> None:
+    """Log error messages to a file with a timestamp."""
+    log_file_path = os.path.join(os.getcwd(), "error_log.txt")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(log_file_path, "a") as log_file:
+        log_file.write(f"[{timestamp}] {error_message}\n")
 
-def validate_settings(settings):
-    """Ensure the settings have all required keys and valid values."""
-    default_settings = {"backup_folder": "backups", "max_backups": 5, "logging_enabled": True}
-    for key, value in default_settings.items():
-        if key not in settings:
-            settings[key] = value
-    return settings
 
-def load_settings():
-    """Load settings from settings.json or return default values."""
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, "r") as f:
-                settings = json.load(f)
-                return validate_settings(settings)
-        except (json.JSONDecodeError, ValueError):
-            print("Error: settings.json is corrupted. Resetting to default settings.")
-
-    # Reset to default settings and save the file
-    default_settings = {"backup_folder": "backups", "max_backups": 5, "logging_enabled": True}
-    save_settings(default_settings)
-    return default_settings
-
-def save_settings(settings):
-    """Save settings to settings.json."""
+def load_tracked_files() -> Dict[str, Any]:
+    """Load tracked files from tracked_files.json."""
     try:
-        with open(SETTINGS_FILE, "w") as f:
-            json.dump(settings, f, indent=4)
-    except Exception as e:
-        print(f"Error: Failed to save settings. {str(e)}")
-
-def load_tracked_files():
-    """Load tracked file metadata from JSON."""
-    if not os.path.exists(TRACKED_FILES_PATH):
+        with open("tracked_files.json", "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        log_error("Error: tracked_files.json not found.")
+        return {}
+    except json.JSONDecodeError:
+        log_error("Error: tracked_files.json is corrupted or improperly formatted.")
+        messagebox.showerror("Error", "The tracked files data is corrupted. Please check the file.")
         return {}
 
-    try:
-        with open(TRACKED_FILES_PATH, "r", encoding="utf-8") as file:
-            data = json.load(file)
-            if not isinstance(data, dict):
-                raise ValueError("Invalid tracked files structure. Expected a dictionary.")
-            return data
-    except (json.JSONDecodeError, ValueError):
-        print("Error: tracked_files.json is corrupted. Returning an empty dictionary.")
-        return {}
 
-def save_tracked_files(tracked_files):
-    """Save tracked file metadata to JSON."""
+def save_tracked_files(tracked_files: Dict[str, Any]) -> None:
+    """Save tracked files to tracked_files.json."""
     try:
-        with open(TRACKED_FILES_PATH, "w", encoding="utf-8") as file:
+        with open("tracked_files.json", "w") as file:
             json.dump(tracked_files, file, indent=4)
     except Exception as e:
-        print(f"Error: Failed to save tracked files. {str(e)}")
+        log_error(f"Error: Failed to save tracked files: {str(e)}")
+        messagebox.showerror("Error", "Failed to save tracked files. Please check your permissions.")
+
+
+def calculate_file_hash(file_path: str) -> Optional[str]:
+    """Calculate the SHA-256 hash of a file."""
+    sha256 = hashlib.sha256()
+    try:
+        with open(file_path, "rb") as file:
+            while chunk := file.read(8192):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    except FileNotFoundError:
+        log_error(f"Error: File not found for hashing: {file_path}")
+        return None
+
+
+def restore_file_version(file_path: str, file_hash: str, backup_folder: str) -> None:
+    """
+    Restore a specific version of a file based on its hash.
+
+    :param file_path: The original file path to restore.
+    :param file_hash: The hash of the file version to restore.
+    :param backup_folder: The root backup folder where file-specific backups are stored.
+    """
+    try:
+        # Normalize the file path
+        normalized_file_path = os.path.normpath(file_path)
+
+        # Extract the base file name (e.g., z.txt)
+        base_file_name = os.path.basename(normalized_file_path)
+
+        # Construct the file-specific backup folder path
+        # ENSURE NO DUPLICATE APPENDING OF base_file_name
+        file_backup_folder = os.path.join(backup_folder, base_file_name)
+
+        # DEBUG: Log the constructed folder path
+        print(f"DEBUG: Backup folder: {file_backup_folder}")
+
+        # Construct the backup file path using the hash
+        backup_file_path = os.path.join(file_backup_folder, f"{base_file_name}_{file_hash}.gz")
+
+        # DEBUG: Log the constructed file path
+        print(f"Restoring from Backup File Path: {backup_file_path}")
+
+        # Check if the backup file exists
+        if not os.path.exists(backup_file_path):
+            raise FileNotFoundError(f"Backup file not found: {backup_file_path}")
+
+        # Decompress and restore the file
+        with gzip.open(backup_file_path, "rb") as src, open(normalized_file_path, "wb") as dest:
+            dest.write(src.read())
+
+        messagebox.showinfo("Success", f"File restored successfully!\n\nFile: {normalized_file_path}")
+
+    except FileNotFoundError as e:
+        error_message = f"Error: {str(e)}"
+        log_error(error_message)
+        messagebox.showerror("Error", error_message)
+        raise
+    except gzip.BadGzipFile:
+        error_message = f"Error: The backup file is corrupted: {backup_file_path}"
+        log_error(error_message)
+        messagebox.showerror("Error", "The backup file is corrupted and cannot be restored.")
+        raise
+    except Exception as e:
+        error_message = f"Error: Unexpected error during restore: {str(e)}"
+        log_error(error_message)
+        messagebox.showerror("Error", "An unexpected error occurred while restoring the file.")
+        raise
