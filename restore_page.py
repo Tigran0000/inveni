@@ -1,120 +1,124 @@
 import os
-import shutil
-import gzip
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from utils import load_tracked_files
+from tkinter import messagebox, ttk
+from utils import load_tracked_files, restore_file_version
 
-def decompress_file(compressed_file_path, output_file_path):
-    """Decompress a gzip file."""
-    try:
-        with gzip.open(compressed_file_path, "rb") as f_in:
-            with open(output_file_path, "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-    except Exception as e:
-        raise Exception(f"Decompression failed: {str(e)}")
 
-def restore_version(file_path, version_hash, backup_folder):
-    """Restore the file to the specified version."""
-    compressed_backup_file_path = os.path.join(backup_folder, f"{version_hash}.gz")
-
-    if not os.path.exists(compressed_backup_file_path):
-        raise FileNotFoundError(f"Backup file for version {version_hash} not found.")
-
-    try:
-        decompress_file(compressed_backup_file_path, file_path)
-    except Exception as e:
-        raise Exception(f"Failed to restore the file: {str(e)}")
-
-def restore_page(root, settings, shared_state):
-    """Restore page GUI for restoring file versions."""
-    selected_file = shared_state.get_selected_file()
+def restore_page(root: tk.Tk, settings: dict, shared_state) -> tk.Frame:
+    """Restore Page: Allows users to restore file versions."""
     backup_folder = settings.get("backup_folder", "backups")
-    os.makedirs(backup_folder, exist_ok=True)
+    selected_file = shared_state.get_selected_file()
 
-    def update_version_list():
-        """Update the version list based on the selected file."""
-        version_list.delete(*version_list.get_children())
+    def refresh_version_list():
+        """Refresh the version list for the selected file."""
+        version_tree.delete(*version_tree.get_children())  # Clear existing entries
 
         if not selected_file:
+            version_tree.insert("", "end", values=("No file selected", "", ""))
             return
 
         tracked_files = load_tracked_files()
         normalized_file_path = os.path.normpath(selected_file)
 
         if normalized_file_path not in tracked_files:
+            version_tree.insert("", "end", values=("No versions available", "", ""))
             return
 
-        file_metadata = tracked_files[normalized_file_path]
-        if "versions" not in file_metadata or not file_metadata["versions"]:
-            return
+        file_versions = tracked_files[normalized_file_path]["versions"]
 
-        for version_hash, metadata in file_metadata["versions"].items():
-            version_list.insert(
-                "", "end", values=(
+        # Sort versions by timestamp (newest first)
+        sorted_versions = sorted(
+            file_versions.items(),
+            key=lambda item: item[1]["timestamp"],
+            reverse=True
+        )
+
+        for version_hash, metadata in sorted_versions:
+            # Add only timestamp, commit message, and username to the tree
+            version_tree.insert(
+                "",
+                "end",
+                values=(
                     metadata.get("timestamp", "Unknown"),
-                    metadata.get("username", "Unknown"),
                     metadata.get("commit_message", "No message"),
-                    version_hash,
-                )
+                    metadata.get("username", "Unknown"),
+                ),
+                tags=(version_hash,),  # Store the hash in the item's tag for internal use
             )
 
-    def select_file():
-        """Open a file dialog to select a file and update the shared state."""
-        file_path = filedialog.askopenfilename()
-        if file_path:
-            shared_state.set_selected_file(file_path)
-        else:
-            shared_state.set_selected_file(None)
+    def restore_selected_version():
+        """Restore the selected version of the file."""
+        selected_item = version_tree.focus()  # Get the currently selected item
+        if not selected_item:
+            messagebox.showerror("Error", "No version selected! Please select a version to restore.")
+            return
 
-    def on_file_updated(file_path):
+        # Retrieve the hash stored in the item's tag
+        selected_hash = version_tree.item(selected_item, "tags")[0]
+        if not selected_hash:
+            messagebox.showerror("Error", "Failed to retrieve the version hash.")
+            return
+
+        # Retrieve additional information for debugging (not displayed in UI)
+        values = version_tree.item(selected_item, "values")
+        selected_timestamp, selected_message, selected_username = values
+
+        # Create the file-specific backup folder path
+        base_file_name = os.path.basename(selected_file)
+        file_backup_folder = os.path.join(backup_folder, base_file_name)
+
+        try:
+            restore_file_version(selected_file, selected_hash, file_backup_folder)
+            messagebox.showinfo(
+                "Success",
+                f"File restored to version from: {selected_timestamp}\nCommit Message: {selected_message}\nUser: {selected_username}"
+            )
+        except FileNotFoundError:
+            messagebox.showerror("Error", f"Backup file not found for the selected version.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to restore the file version: {str(e)}")
+
+    def on_file_updated(file_path: str):
         """Callback to update the UI when the selected file changes."""
         nonlocal selected_file
         selected_file = file_path
         if selected_file:
             selected_file_label.config(text=f"Selected File: {selected_file}")
-            update_version_list()
+            restore_button.config(state=tk.NORMAL)
         else:
             selected_file_label.config(text="No file selected")
-            version_list.delete(*version_list.get_children())
+            restore_button.config(state=tk.DISABLED)
 
-    def restore_selected_version():
-        """Restore the selected version of the file."""
-        selected_item = version_list.selection()
-        if not selected_file or not selected_item:
-            messagebox.showerror("Error", "No file or version selected!")
-            return
+        # Refresh the version list whenever the file is updated
+        refresh_version_list()
 
-        version_hash = version_list.item(selected_item, "values")[3]
-        try:
-            restore_version(selected_file, version_hash, backup_folder)
-            messagebox.showinfo("Success", f"File '{selected_file}' has been restored to the selected version.")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to restore the file: {str(e)}")
-
+    # UI Setup
     frame = tk.Frame(root)
+
+    # Title
     tk.Label(frame, text="Restore a File", font=("Arial", 16)).pack(pady=10)
 
+    # File selection info
     selected_file_label = tk.Label(
         frame,
         text=f"Selected File: {selected_file}" if selected_file else "No file selected",
         font=("Arial", 10),
-        fg="gray"
+        fg="gray",
     )
     selected_file_label.pack(pady=5)
-    tk.Button(frame, text="Select File", command=select_file).pack(pady=5)
 
-    tk.Label(frame, text="Select a Version:").pack(pady=5)
-    version_list = ttk.Treeview(frame, columns=("Timestamp", "User", "Message", "Hash"), show="headings", height=8)
-    version_list.pack(pady=5, fill="x", expand=True)
-    version_list.heading("Timestamp", text="Date and Time")
-    version_list.heading("User", text="User")
-    version_list.heading("Message", text="Commit Message")
-    version_list.heading("Hash", text="Version Hash")
-    version_list.column("Hash", width=250)
+    # Version list
+    version_tree = ttk.Treeview(frame, columns=("Timestamp", "Message", "User"), show="headings", height=8)
+    version_tree.pack(pady=10, fill="x", expand=True)
+    version_tree.heading("Timestamp", text="Date and Time")
+    version_tree.heading("Message", text="Commit Message")
+    version_tree.heading("User", text="User")
 
-    tk.Button(frame, text="Restore Selected Version", command=restore_selected_version).pack(pady=10)
+    # Restore button
+    restore_button = tk.Button(frame, text="Restore Selected Version", command=restore_selected_version, state=tk.DISABLED)
+    restore_button.pack(pady=10)
 
+    # Register the callback
     shared_state.add_callback(on_file_updated)
 
     return frame
